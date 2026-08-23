@@ -253,6 +253,15 @@ asserts that each sticker remains in one split. Large generated files and public
 datasets remain outside Git; see [the dataset strategy](docs/dataset_strategy.md)
 for sources, licence notes, manifest format, and physical-capture guidance.
 
+#### Run the notebook on Kaggle
+
+Import `notebooks/hybrid_dataset_demo.ipynb` into Kaggle and select **Run all**.
+The setup cell finds an attached repository automatically or clones this public
+repository into `/kaggle/working`. For automatic cloning, turn on **Internet** in
+the notebook options. If Internet access is unavailable, upload the repository as
+a Kaggle Dataset and attach it to the notebook; the same setup cell detects it
+under `/kaggle/input`.
+
 ## Validation and promotion
 
 The most important metric is **exact payload match**: a partially correct charger
