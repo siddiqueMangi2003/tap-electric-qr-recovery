@@ -24,7 +24,7 @@ class DatasetExample:
 class DatasetManifest:
     version: str
     examples: list[DatasetExample]
-    grouping_strategy: str = "charger_id with image-hash duplicate protection"
+    grouping_strategy: str = "charger group with sticker/image duplicate protection"
 
     @property
     def split_counts(self) -> dict[str, int]:
@@ -51,13 +51,25 @@ class DatasetBuilder:
         version = f"dataset-{digest}"
         examples: list[DatasetExample] = []
         split_by_image_hash: dict[str, str] = {}
+        split_by_group: dict[str, str] = {}
         for scan in sorted_scans:
             if scan.label is None or not scan.label.training_eligible:
                 continue
             group_id = scan.label.charger_id
-            split = split_by_image_hash.setdefault(
-                scan.image_sha256, self._split_for_group(group_id)
-            )
+            if scan.dataset_split:
+                if scan.dataset_split not in {"train", "validation", "test"}:
+                    raise ValueError(f"Unsupported dataset split: {scan.dataset_split}")
+                existing = split_by_group.setdefault(group_id, scan.dataset_split)
+                if existing != scan.dataset_split:
+                    raise ValueError(f"Group {group_id} appears in multiple splits")
+        for scan in sorted_scans:
+            if scan.label is None or not scan.label.training_eligible:
+                continue
+            group_id = scan.label.charger_id
+            split = split_by_group.get(group_id, self._split_for_group(group_id))
+            duplicate_split = split_by_image_hash.setdefault(scan.image_sha256, split)
+            if duplicate_split != split:
+                raise ValueError("Duplicate image hash appears in multiple splits")
             examples.append(
                 DatasetExample(
                     scan_id=scan.id,

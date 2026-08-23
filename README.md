@@ -231,6 +231,28 @@ is then evaluated through the complete QR/OCR/GPS pipeline before promotion.
 Dry-run mode validates dataset construction without importing PyTorch or
 downloading a model.
 
+### Hybrid dataset and interview notebook
+
+The repository includes a reproducible synthetic sticker generator and a
+normalized importer shared by synthetic, public, physical, and future Tap data:
+
+```powershell
+python -m pip install -e ".[dev,notebook]"
+python -m scripts.generate_synthetic_dataset `
+  --chargers 500 `
+  --variants-per-charger 10 `
+  --seed 42
+python -m scripts.import_dataset --manifest data/synthetic/manifest.json
+jupyter lab notebooks/hybrid_dataset_demo.ipynb
+```
+
+The committed [hybrid dataset notebook](notebooks/hybrid_dataset_demo.ipynb) is
+already executed for GitHub viewing. It generates a small 60-image demonstration,
+shows clean/degraded scans, charts baseline recovery and quality signals, and
+asserts that each sticker remains in one split. Large generated files and public
+datasets remain outside Git; see [the dataset strategy](docs/dataset_strategy.md)
+for sources, licence notes, manifest format, and physical-capture guidance.
+
 ## Validation and promotion
 
 The most important metric is **exact payload match**: a partially correct charger
@@ -363,6 +385,8 @@ app/
 ├── schemas/                # Pydantic request/response contracts
 └── services/               # Storage and inference/training orchestration
 scripts/                    # Demo charger seed command
+notebooks/                  # Executed hybrid-data interview demonstration
+docs/                       # Dataset provenance and normalized manifest contract
 tests/                      # Fast unit and API tests
 Dockerfile
 docker-compose.yml

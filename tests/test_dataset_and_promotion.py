@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from app.db.models import Scan, ScanLabel
 from app.ml.dataset import DatasetBuilder
 from app.ml.model_registry import EvaluationMetrics, ModelPromotionPolicy
@@ -37,6 +39,15 @@ def test_dataset_keeps_same_charger_in_one_split() -> None:
         example.split for example in manifest.examples if example.charger_id == "charger-a"
     }
     assert len(charger_a_splits) == 1
+
+
+def test_dataset_rejects_explicit_charger_leakage() -> None:
+    first = _labeled_scan("1", "charger-a", "a" * 64)
+    second = _labeled_scan("2", "charger-a", "b" * 64)
+    first.dataset_split = "train"
+    second.dataset_split = "test"
+    with pytest.raises(ValueError, match="multiple splits"):
+        DatasetBuilder().build([first, second])
 
 
 def test_model_promotion_requires_gain_without_clean_regression() -> None:
