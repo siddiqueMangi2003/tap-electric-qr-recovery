@@ -248,7 +248,8 @@ jupyter lab notebooks/hybrid_dataset_demo.ipynb
 
 The committed [hybrid dataset notebook](notebooks/hybrid_dataset_demo.ipynb) is
 already executed for GitHub viewing. It generates a small 60-image demonstration,
-shows clean/degraded scans, charts baseline recovery and quality signals, and
+shows clean/degraded scans, compares the OpenCV baseline with quality-directed
+preprocessing plus a ZXing-C++ decoder fallback, charts quality signals, and
 asserts that each sticker remains in one split. Large generated files and public
 datasets remain outside Git; see [the dataset strategy](docs/dataset_strategy.md)
 for sources, licence notes, manifest format, and physical-capture guidance.

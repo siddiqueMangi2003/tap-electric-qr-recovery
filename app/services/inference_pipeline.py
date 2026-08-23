@@ -148,5 +148,6 @@ class InferencePipeline:
             last_strategy = candidate.strategy
             decoded = self.qr_decoder.decode(candidate.image)
             if decoded:
-                return decoded.payload, candidate.strategy, decoded.confidence
+                strategy = f"{candidate.strategy}:{decoded.decoder}"
+                return decoded.payload, strategy, decoded.confidence
         return None, last_strategy, 0.0

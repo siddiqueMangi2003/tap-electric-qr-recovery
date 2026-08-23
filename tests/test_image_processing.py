@@ -29,3 +29,21 @@ def test_opencv_qr_decoder_recovers_real_payload() -> None:
     result = QRDecoder().decode(bgr_image)
     assert result is not None
     assert result.payload == payload
+    assert result.decoder == "opencv"
+
+
+def test_zxing_fallback_recovers_motion_blur_that_opencv_misses() -> None:
+    payload = "https://tap-electric.com/c/NL-TAP-E12345"
+    qr_image = np.array(qrcode.make(payload).convert("RGB"))
+    bgr_image = cv2.cvtColor(qr_image, cv2.COLOR_RGB2BGR)
+    kernel = np.zeros((11, 11), dtype=np.float32)
+    kernel[5, :] = 1 / 11
+    blurred = cv2.filter2D(bgr_image, -1, kernel)
+
+    decoder = QRDecoder()
+    assert decoder.decode_opencv(blurred) is None
+    result = decoder.decode(blurred)
+
+    assert result is not None
+    assert result.payload == payload
+    assert result.decoder == "zxingcpp"

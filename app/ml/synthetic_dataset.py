@@ -10,8 +10,9 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from app.services.image_quality import ImageQualityService
-from app.services.qr_decoder import QRDecoder
+from app.services.image_quality import ImageQuality, ImageQualityService
+from app.services.preprocessing import ImagePreprocessor
+from app.services.qr_decoder import QRDecoder, QRDecodeResult
 
 DEGRADATIONS = (
     "gaussian_blur",
@@ -72,6 +73,9 @@ class SyntheticExample:
     brightness_score: float
     brightness_category: str
     native_qr_success: bool
+    recovered_qr_success: bool
+    recovery_strategy: str | None
+    recovery_decoder: str | None
     image_sha256: str
 
 
@@ -84,6 +88,7 @@ class SyntheticDatasetGenerator:
         self.random = random.Random(config.seed)
         self.numpy_rng = np.random.default_rng(config.seed)
         self.quality_service = ImageQualityService()
+        self.preprocessor = ImagePreprocessor()
         self.decoder = QRDecoder()
 
     def generate(self, output_dir: Path) -> Path:
@@ -123,7 +128,8 @@ class SyntheticDatasetGenerator:
                 image_path.write_bytes(image_bytes)
 
                 quality = self.quality_service.analyze(image)
-                decoded = self.decoder.decode(image)
+                native_decoded = self.decoder.decode_opencv(image)
+                recovered, recovery_strategy = self._recover(image, quality, payload)
                 examples.append(
                     SyntheticExample(
                         example_id=example_id,
@@ -142,7 +148,12 @@ class SyntheticDatasetGenerator:
                         blur_score=round(quality.blur_score, 3),
                         brightness_score=round(quality.brightness_score, 3),
                         brightness_category=quality.brightness_category,
-                        native_qr_success=bool(decoded and decoded.payload == payload),
+                        native_qr_success=bool(
+                            native_decoded and native_decoded.payload == payload
+                        ),
+                        recovered_qr_success=recovered is not None,
+                        recovery_strategy=recovery_strategy,
+                        recovery_decoder=(recovered.decoder if recovered else None),
                         image_sha256=hashlib.sha256(image_bytes).hexdigest(),
                     )
                 )
@@ -159,6 +170,22 @@ class SyntheticDatasetGenerator:
         manifest_path = output_dir / "manifest.json"
         manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         return manifest_path
+
+    def _recover(
+        self,
+        image: np.ndarray,
+        quality: ImageQuality,
+        payload: str,
+    ) -> tuple[QRDecodeResult | None, str | None]:
+        for candidate in self.preprocessor.generate_candidates(image, quality):
+            decoded = self.decoder.decode(candidate.image)
+            if decoded and decoded.payload == payload:
+                return decoded, candidate.strategy
+        for candidate in self.preprocessor.restoration_candidates(image):
+            decoded = self.decoder.decode(candidate.image)
+            if decoded and decoded.payload == payload:
+                return decoded, candidate.strategy
+        return None, None
 
     def _assign_splits(self) -> dict[str, str]:
         charger_ids = [f"NL-TAP-E{index:05d}" for index in range(1, self.config.chargers + 1)]

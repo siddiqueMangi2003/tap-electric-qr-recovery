@@ -43,6 +43,10 @@ def test_synthetic_generator_creates_exact_grouped_manifest(tmp_path: Path) -> N
         assert image_path.is_file()
         assert hashlib.sha256(image_path.read_bytes()).hexdigest() == example["image_sha256"]
         assert example["charger_id"] in example["qr_payload"]
+        assert isinstance(example["recovered_qr_success"], bool)
+        if example["recovered_qr_success"]:
+            assert example["recovery_strategy"]
+            assert example["recovery_decoder"] in {"opencv", "zxingcpp"}
     assert all(len(splits) == 1 for splits in split_by_sticker.values())
 
 
