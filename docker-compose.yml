@@ -1,0 +1,35 @@
+services:
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://tap:tap@postgres:5432/tap_qr
+      OBJECT_STORAGE_BACKEND: local
+      LOCAL_STORAGE_PATH: /service/data/images
+      ENABLE_TROCR: "false"
+    ports:
+      - "8000:8000"
+    volumes:
+      - scan-images:/service/data/images
+      - model-artifacts:/service/models
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: tap_qr
+      POSTGRES_USER: tap
+      POSTGRES_PASSWORD: tap
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tap -d tap_qr"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  postgres-data:
+  scan-images:
+  model-artifacts:
