@@ -3,7 +3,7 @@ from app.db.base import Base
 from app.db.models import Charger
 from app.db.session import build_engine, build_session_factory
 
-DEMO_CHARGERS = [
+SEED_CHARGERS = [
     Charger(
         charger_id="NL-TAP-E12345",
         qr_payload="https://tap-electric.com/c/NL-TAP-E12345",
@@ -25,10 +25,10 @@ def main() -> None:
     Base.metadata.create_all(engine)
     session = build_session_factory(engine)()
     try:
-        for charger in DEMO_CHARGERS:
+        for charger in SEED_CHARGERS:
             session.merge(charger)
         session.commit()
-        print(f"Seeded {len(DEMO_CHARGERS)} demo chargers")
+        print(f"Seeded {len(SEED_CHARGERS)} chargers")
     finally:
         session.close()
         engine.dispose()

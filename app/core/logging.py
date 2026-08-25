@@ -3,7 +3,7 @@ from typing import Any
 
 
 def configure_logging(level: int = logging.INFO) -> None:
-    """Configure concise process-wide logging for the demonstration service."""
+    """Configure concise process-wide application logging."""
 
     logging.basicConfig(
         level=level,

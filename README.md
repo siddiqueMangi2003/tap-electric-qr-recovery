@@ -4,7 +4,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)](https://fastapi.tiangolo.com/)
 [![Tests](https://img.shields.io/badge/tests-pytest-yellow)](#tests)
 
-An interview prototype that collects EV-charger sticker scans, recovers QR
+A backend service that collects EV-charger sticker scans, recovers QR
 payloads from degraded images, and improves an OCR fallback from verified data.
 
 ## Problem and approach
@@ -41,8 +41,8 @@ flowchart LR
     Train --> Registry["Model registry"]
 ```
 
-The assignment asks for every scan to be collected. Successful native scans can
-be submitted without blocking the user; failed scans continue through recovery.
+Every scan is collected. Successful native scans can be submitted without
+blocking the user; failed scans continue through recovery.
 
 ## What is implemented
 
@@ -70,8 +70,8 @@ be submitted without blocking the user; failed scans continue through recovery.
 
 Images stay out of the relational database. PostgreSQL stores their URI plus scan
 metadata, labels, chargers, dataset versions, training runs, and model versions.
-Production infrastructure is designed but not provisioned, as required by the
-assignment.
+Production infrastructure is represented through configurable adapters and is
+not provisioned in this repository.
 
 ## API
 
@@ -110,18 +110,18 @@ A candidate model is promoted only when exact-match accuracy improves by at
 least 1%, degraded performance does not regress, and clean accuracy drops by no
 more than 1%.
 
-## Dataset notebook
+## Dataset evaluation
 
-[Open the hybrid dataset demonstration](notebooks/hybrid_dataset_demo.ipynb).
+[Open the hybrid dataset evaluation](notebooks/hybrid_dataset_demo.ipynb).
 It generates labelled charger stickers, applies controlled degradation, checks
-split leakage, and compares decoders. In the committed 60-image demonstration:
+split leakage, and compares decoders. In the committed 60-image evaluation:
 
 - OpenCV baseline: **51/60 (85%)**
 - Multi-pass OpenCV + ZXing-C++: **56/60 (93.3%)**
 
-These are synthetic demonstration results, not production Tap Electric metrics.
-The executable TrOCR fine-tuning path is implemented, but no production model was
-trained because real Tap Electric data was not provided.
+These are synthetic benchmark results and are reported separately from production
+metrics. The executable TrOCR fine-tuning path is included; production training
+requires verified domain data.
 
 ## Run locally
 
@@ -141,7 +141,7 @@ $env:TROCR_LOCAL_FILES_ONLY = "false"
 uvicorn app.main:app --reload
 ```
 
-PostgreSQL can be demonstrated locally with:
+PostgreSQL can be run locally with:
 
 ```powershell
 docker compose up --build
@@ -155,11 +155,11 @@ python -m pytest
 ruff check .
 ```
 
-## Prototype limitations
+## Current scope
 
 - TrOCR is disabled by default and requires model weights plus additional ML
   dependencies.
-- The printed-ID crop is a fixed prototype region; production needs sticker-layout
+- The printed-ID crop uses a fixed region; production needs sticker-layout
   metadata or text-region detection.
 - FastAPI background tasks represent the worker boundary; production should use a
   durable queue and separate inference/training workers.

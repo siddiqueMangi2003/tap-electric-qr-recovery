@@ -41,7 +41,7 @@ class TrocrRecognizer:
 
     @staticmethod
     def crop_printed_identifier_region(image: np.ndarray) -> np.ndarray:
-        """Prototype ROI: preserve the lower sticker area where IDs are commonly printed."""
+        """Preserve the lower sticker area where printed IDs are commonly located."""
 
         height = image.shape[0]
         return image[int(height * 0.55) : height, :]

@@ -118,7 +118,7 @@ include a frozen temporal set containing unseen chargers and capture sessions.
 
 ## Notebook
 
-`notebooks/hybrid_dataset_demo.ipynb` is an executed, lightweight interview demo.
+`notebooks/hybrid_dataset_demo.ipynb` is an executed, reproducible dataset evaluation.
 It regenerates 60 examples, displays clean/degraded samples, measures OpenCV QR
 recovery by degradation, visualizes quality signals, and proves split isolation.
 It does not download TrOCR or report synthetic results as production accuracy.
