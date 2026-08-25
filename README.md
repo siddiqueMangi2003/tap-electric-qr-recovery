@@ -202,8 +202,11 @@ exact Haversine distance, and ranks candidates with an explicit score:
 ```
 
 Candidates below the text-similarity safety threshold are not silently replaced.
-The API records an explanation with the final choice. GPS is corroborating
-evidence, never permission to invent missing information.
+When the two strongest candidates are too close to call, the API leaves the scan
+unresolved and returns up to three nearby options with their distance, text
+similarity, and match score for manual selection. A clear winner is still returned
+as a single resolved charger. GPS is corroborating evidence, never permission to
+invent missing information.
 
 ## Training pipeline
 

@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 
 from app.repositories.chargers import ChargerRepository
-from app.services.charger_resolver import ChargerResolver
+from app.services.charger_resolver import ChargerCandidate, ChargerResolver
 from app.services.image_quality import ImageQualityService
 from app.services.ml_recognizer import TrocrRecognizer
 from app.services.preprocessing import ImagePreprocessor, PreprocessedImage
@@ -24,6 +24,7 @@ class InferenceResult:
     prediction_source: str | None
     confidence: float
     resolution_explanation: str
+    candidates: tuple[ChargerCandidate, ...] = ()
 
 
 class InvalidImageError(ValueError):
@@ -138,6 +139,7 @@ class InferencePipeline:
             prediction_source=source,
             confidence=resolution.confidence,
             resolution_explanation=resolution.explanation,
+            candidates=resolution.candidates,
         )
 
     def _try_qr_candidates(

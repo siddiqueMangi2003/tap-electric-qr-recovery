@@ -46,4 +46,5 @@ async def run_inference(
         brightness_score=result.brightness_score,
         brightness_category=result.brightness_category,
         explanation=result.resolution_explanation,
+        candidates=list(result.candidates),
     )

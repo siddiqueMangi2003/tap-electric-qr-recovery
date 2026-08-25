@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.schemas.inference import ChargerCandidateResponse
+
 
 class ScanCreate(BaseModel):
     latitude: float = Field(ge=-90, le=90)
@@ -70,6 +72,7 @@ class ScanResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     label: ScanLabelResponse | None = None
+    candidates: list[ChargerCandidateResponse] = Field(default_factory=list)
 
 
 class ScanConfirmationRequest(BaseModel):

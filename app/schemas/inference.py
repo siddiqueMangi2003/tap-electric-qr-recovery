@@ -1,4 +1,14 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ChargerCandidateResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    charger_id: str
+    qr_payload: str
+    distance_meters: float
+    text_similarity: float
+    match_score: float
 
 
 class InferenceResponse(BaseModel):
@@ -13,3 +23,4 @@ class InferenceResponse(BaseModel):
     brightness_score: float
     brightness_category: str
     explanation: str
+    candidates: list[ChargerCandidateResponse] = Field(default_factory=list)

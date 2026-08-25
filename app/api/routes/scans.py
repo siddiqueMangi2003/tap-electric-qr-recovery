@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db
 from app.db.models import Scan
+from app.repositories.chargers import ChargerRepository
 from app.repositories.scans import ScanRepository
 from app.schemas.scans import (
     ScanAccepted,
@@ -27,6 +28,7 @@ from app.schemas.scans import (
     ScanLabelResponse,
     ScanResponse,
 )
+from app.services.charger_resolver import ChargerResolver
 from app.services.inference_pipeline import InvalidImageError, decode_image
 
 router = APIRouter(prefix="/scans", tags=["scans"])
@@ -127,11 +129,29 @@ async def create_scan(
 
 
 @router.get("/{scan_id}", response_model=ScanResponse)
-def get_scan(scan_id: str, db: Annotated[Session, Depends(get_db)]) -> Scan:
+def get_scan(
+    scan_id: str,
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+) -> ScanResponse:
     scan = ScanRepository(db).get(scan_id, with_label=True)
     if scan is None:
         raise HTTPException(status_code=404, detail="Scan not found")
-    return scan
+    response = ScanResponse.model_validate(scan)
+    if scan.resolved_charger_id is None and scan.final_prediction:
+        resolver = ChargerResolver(
+            ChargerRepository(db),
+            radius_meters=request.app.state.settings.inference_radius_meters,
+        )
+        response.candidates = [
+            candidate
+            for candidate in resolver.rank_candidates(
+                scan.final_prediction,
+                latitude=scan.latitude,
+                longitude=scan.longitude,
+            )
+        ]
+    return response
 
 
 @router.post("/{scan_id}/confirm", response_model=ScanLabelResponse, status_code=201)
