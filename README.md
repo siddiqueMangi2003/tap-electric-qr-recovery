@@ -2,414 +2,170 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)](https://fastapi.tiangolo.com/)
-[![Tests](https://img.shields.io/badge/tests-pytest-yellow)](#run-tests)
+[![Tests](https://img.shields.io/badge/tests-pytest-yellow)](#tests)
 
-An interview-ready prototype for collecting degraded EV-charger sticker scans,
-recovering their existing QR payloads, confirming ground truth, and improving an
-OCR fallback from verified examples.
+An interview prototype that collects EV-charger sticker scans, recovers QR
+payloads from degraded images, and improves an OCR fallback from verified data.
 
-> The QR code already contains the required charger identifiers. Therefore the
-> optimization target is not generating new charger information, but increasing
-> the probability of correctly recovering the existing QR payload from degraded
-> camera images.
+## Problem and approach
 
-## Problem
+QR stickers may fail because of blur, darkness, glare, fading, rotation, or
+perspective distortion. The normal phone scanner remains the fastest path.
+This service stores the scan and context, then runs a recovery pipeline when the
+native scan fails:
 
-Mobile QR readers work well on clean stickers but may fail when the image is
-blurry, dark, overexposed, faded, noisy, rotated, photographed at an angle, or
-partially damaged. This service creates the feedback loop that is missing after
-such a failure:
-
-1. Durably collect the image and useful non-personal capture metadata.
-2. Try inexpensive QR-specific recovery before invoking ML.
-3. Use location and the known charger catalogue to rank plausible candidates.
-4. Accept verified ground truth and train only from trusted labels.
-5. Evaluate a candidate model against frozen baselines before promotion.
-
-## Key decisions
-
-- **QR decoding comes first.** QR codes have error correction and geometric
-  structure that a standard decoder understands; a general OCR model does not.
-- **TrOCR has a narrow role.** `microsoft/trocr-base-printed` reads the
-  human-readable charger/connector identifier commonly printed around a QR code.
-  It is not presented as a QR-matrix decoder.
-- **Inference is asynchronous.** The API stores the image and metadata, queues a
-  worker job, and returns `202 Accepted`.
-- **Storage is split by data shape.** PostgreSQL stores metadata and labels;
-  S3-compatible object storage stores image and model blobs.
-- **Only verified labels train the model.** A user correction is pending until a
-  trusted confirmation source or review marks it eligible.
-- **The prototype stays small.** FastAPI `BackgroundTasks` represents the worker
-  boundary locally. A queue can replace it without changing the inference service.
-
-## Architecture
-
-```mermaid
-flowchart TD
-    App["Tap Electric app"] -->|"multipart scan + GPS"| API["FastAPI ingestion"]
-    API --> Validate["Validate type, bytes, size and coordinates"]
-    Validate --> ObjectStore[("S3-compatible image storage")]
-    ObjectStore --> ScanDB[("PostgreSQL scan record")]
-    ScanDB --> Queue["Enqueue inference job"]
-    Queue -->|"202 scan_id + queued"| App
-
-    Queue -.-> Worker["Inference worker"]
-    Worker --> Quality["Blur, brightness and contrast"]
-    Quality --> Preprocess["Quality-directed OpenCV candidates"]
-    Preprocess --> Decoder["Standard QR decoder"]
-    Decoder --> Decoded{"Payload recovered?"}
-    Decoded -->|Yes| Resolver["GPS + catalogue resolver"]
-    Decoded -->|No| Restore["Denoise, upscale, threshold and retry"]
-    Restore --> Retry{"Payload recovered?"}
-    Retry -->|Yes| Resolver
-    Retry -->|No| Crop["Crop printed identifier region"]
-    Crop --> TrOCR["TrOCR OCR fallback"]
-    TrOCR --> Resolver
-    Resolver --> Result["Prediction, confidence and explanation"]
-    Result --> ScanDB
-
-    App -->|"Confirm correct payload"| Label["Reviewable ground-truth label"]
-    Label --> Verified[("Verified labels only")]
-    Verified --> Dataset["Versioned grouped dataset"]
-    Dataset --> Train["Offline fine-tuning"]
-    Train --> Evaluate["Exact match, CER and degradation slices"]
-    Evaluate --> Gate{"Promotion gates pass?"}
-    Gate -->|Yes| Registry[("Model registry")]
-    Gate -->|No| Retain["Retain incumbent"]
-    Registry -.-> Worker
+```text
+Native scanner
+  -> OpenCV QR decoder
+  -> ZXing-C++ QR decoder
+  -> TrOCR printed-ID fallback
+  -> GPS + charger-catalogue resolution
 ```
 
-The apparent cross-store transaction is deliberately ordered: upload the image,
-commit the scan record, then enqueue inference. If the database commit fails, the
-API deletes the uploaded object as compensation. In production an outbox pattern
-would make job publication reliable across process crashes.
+A clear match returns one charger. An ambiguous match returns up to three nearby
+candidates with distance and match scores for manual selection. The service does
+not guess when confidence is insufficient.
+
+## System flow
+
+```mermaid
+flowchart LR
+    App["Mobile app"] -->|"image + GPS + scan result"| API["FastAPI"]
+    API --> Images["Object storage"]
+    API --> DB["Metadata database"]
+    API --> Recovery["QR recovery pipeline"]
+    Recovery --> Resolver["GPS + charger catalogue"]
+    Resolver --> Result["Resolved charger or candidates"]
+    Result --> Verify["Trusted confirmation"]
+    Verify --> Train["TrOCR training + validation"]
+    Train --> Registry["Model registry"]
+```
+
+The assignment asks for every scan to be collected. Successful native scans can
+be submitted without blocking the user; failed scans continue through recovery.
+
+## What is implemented
+
+- Multipart scan ingestion with GPS, capture, device, app, and native-decoder
+  metadata.
+- Idempotent mobile retries and asynchronous background processing.
+- Local and S3-compatible object-storage adapters.
+- SQLite for local use and PostgreSQL-compatible SQLAlchemy models for production.
+- Image-quality analysis and quality-directed OpenCV preprocessing.
+- OpenCV and ZXing-C++ QR decoding.
+- Optional `microsoft/trocr-base-printed` inference for printed charger IDs.
+- GPS-radius filtering, Haversine distance, text matching, confidence scoring,
+  and ranked manual candidates.
+- Verified labels, versioned grouped datasets, augmentation, TrOCR fine-tuning,
+  evaluation, model registration, and promotion gates.
+- Automated linting and 22 tests.
+
+## Storage choices
+
+| Data | Local default | Production design |
+|---|---|---|
+| Images | `data/images/` | S3-compatible object storage |
+| Metadata and labels | SQLite | PostgreSQL |
+| Model artifacts | `models/` | Versioned model/object storage |
+
+Images stay out of the relational database. PostgreSQL stores their URI plus scan
+metadata, labels, chargers, dataset versions, training runs, and model versions.
+Production infrastructure is designed but not provisioned, as required by the
+assignment.
 
 ## API
 
-Interactive OpenAPI documentation is available at
-`http://localhost:8000/docs`.
+Interactive documentation is available at `http://localhost:8000/docs`.
 
-| Method | Route | Purpose |
+| Method | Endpoint | Purpose |
 |---|---|---|
-| `POST` | `/api/v1/scans` | Store a scan and queue inference |
-| `GET` | `/api/v1/scans/{scan_id}` | Read processing state and predictions |
-| `POST` | `/api/v1/scans/{scan_id}/confirm` | Add reviewable ground truth |
-| `POST` | `/api/v1/inference` | Synchronously exercise the pipeline |
-| `POST` | `/api/v1/training/run` | Start dry-run or real offline training |
+| `POST` | `/api/v1/scans` | Store a scan and start processing |
+| `GET` | `/api/v1/scans/{scan_id}` | Return status, result, or ranked candidates |
+| `POST` | `/api/v1/scans/{scan_id}/confirm` | Add trusted ground truth |
+| `POST` | `/api/v1/inference` | Run the recovery pipeline synchronously |
+| `POST` | `/api/v1/training/run` | Start dataset creation or fine-tuning |
 | `GET` | `/api/v1/training/runs/{run_id}` | Read training status |
-| `GET` | `/api/v1/models` | List model versions and evaluation metrics |
-| `GET` | `/health` | Liveness check |
+| `GET` | `/api/v1/models` | List model versions and metrics |
+| `GET` | `/health` | Health check |
 
-Create a scan:
+## Model training and validation
 
-```bash
-curl -X POST http://localhost:8000/api/v1/scans \
-  -F "image=@charger.jpg" \
-  -F "latitude=52.3676" \
-  -F "longitude=4.9041" \
-  -F "timestamp=2026-08-23T12:00:00Z" \
-  -F "gps_accuracy_meters=8" \
-  -F "client_scan_id=mobile-0193" \
-  -F "native_qr_success=false"
-```
+Only verified examples enter training. A trusted label can come from another
+successfully decoded frame, a confirmed charging session, or manual review.
+Unverified model predictions never become training labels automatically.
 
-The response is intentionally non-blocking:
+The dataset is split 70/15/15 into train, validation, and test sets. Splitting is
+grouped by charger and protected against duplicate-image leakage. Training applies
+blur, brightness, noise, contrast, rotation, and perspective augmentation.
 
-```json
-{
-  "scan_id": "de305d54-75b4-431b-adb2-eb6b9e546014",
-  "status": "queued",
-  "image_uri": "local://de305d54-75b4-431b-adb2-eb6b9e546014.jpg"
-}
-```
+Validation measures:
 
-Confirm the label after a trusted workflow has established the correct charger:
+- exact-match accuracy;
+- character error rate;
+- recovery rate on previously failed scans;
+- clean-scan accuracy;
+- degraded-scan accuracy.
 
-```bash
-curl -X POST http://localhost:8000/api/v1/scans/SCAN_ID/confirm \
-  -H "Content-Type: application/json" \
-  -d '{
-    "correct_qr_payload": "https://tap-electric.com/c/NL-TAP-E12345",
-    "charger_id": "NL-TAP-E12345",
-    "confirmation_source": "operator",
-    "verified": true
-  }'
-```
+A candidate model is promoted only when exact-match accuracy improves by at
+least 1%, degraded performance does not regress, and clean accuracy drops by no
+more than 1%.
 
-`client_scan_id` provides idempotency for mobile retries. Files are limited to a
-configurable size and decoded before storage, rather than trusting the MIME header.
+## Dataset notebook
 
-## Data model
+[Open the hybrid dataset demonstration](notebooks/hybrid_dataset_demo.ipynb).
+It generates labelled charger stickers, applies controlled degradation, checks
+split leakage, and compares decoders. In the committed 60-image demonstration:
 
-| Entity | Responsibility |
-|---|---|
-| `Scan` | Image URI, capture context, quality signals, all pipeline outputs and status |
-| `ScanLabel` | Correct payload, charger ID, provenance, review state and eligibility |
-| `Charger` | Known payload and coordinates used for explainable GPS validation |
-| `DatasetVersion` | Immutable manifest, example count and grouping policy |
-| `TrainingRun` | Asynchronous job state and produced dataset/model versions |
-| `ModelVersion` | Artifact path, end-to-end metrics and promotion state |
+- OpenCV baseline: **51/60 (85%)**
+- Multi-pass OpenCV + ZXing-C++: **56/60 (93.3%)**
 
-UUIDs and scan/session identifiers are used instead of user identity. Raw image
-bytes are never stored in PostgreSQL. The SQLAlchemy schema works with PostgreSQL;
-SQLite and local object storage keep development and tests self-contained.
-
-## Inference pipeline
-
-### 1. Quality analysis
-
-- Blur/sharpness: variance of the grayscale Laplacian.
-- Brightness: mean grayscale intensity classified as `too_dark`, `normal`, or
-  `too_bright`.
-- Contrast: grayscale standard deviation.
-
-These measurements select a small set of preprocessing candidates. For example,
-dark/low-contrast images get CLAHE and adaptive thresholding, while blurry images
-get a conservative unsharp mask. The system does not destructively apply every
-transformation in sequence.
-
-### 2. QR-specific recovery
-
-OpenCV `QRCodeDetector` is tried against the original and quality-directed
-candidates. If they fail, a more expensive restoration pass denoises, upscales,
-enhances contrast, thresholds, and retries. A successful QR decode stops the ML
-fallback.
-
-### 3. TrOCR fallback
-
-The prototype integrates
-[`microsoft/trocr-base-printed`](https://huggingface.co/microsoft/trocr-base-printed),
-a small, understandable Hugging Face image-to-text model for printed text. It is
-lazy-loaded only when `ENABLE_TROCR=true` and operates on a configurable printed-ID
-region of interest. Fine-tuning targets the verified `charger_id` visible on the
-sticker; the charger catalogue then maps that identifier back to the complete QR
-payload.
-
-This demonstrates model integration and fine-tuning while staying technically
-honest. Production QR recovery may benefit more from QR localization,
-perspective/crease correction, learned super-resolution, segmentation, multiple
-video frames, or a QR-specific restoration model. The fixed lower-sticker crop is
-also only a prototype; a production system needs sticker layout metadata or text
-region detection.
-
-### 4. Location-aware resolution
-
-The resolver fetches active chargers in a geographical bounding box, applies an
-exact Haversine distance, and ranks candidates with an explicit score:
-
-```text
-0.55 × text similarity + 0.25 × distance score + 0.20 × source confidence
-```
-
-Candidates below the text-similarity safety threshold are not silently replaced.
-When the two strongest candidates are too close to call, the API leaves the scan
-unresolved and returns up to three nearby options with their distance, text
-similarity, and match score for manual selection. A clear winner is still returned
-as a single resolved charger. GPS is corroborating evidence, never permission to
-invent missing information.
-
-## Training pipeline
-
-Only `ScanLabel.training_eligible=true` examples enter a manifest. The manifest
-contains the object URI, exact payload, charger, split, and degradation category.
-Its content-derived version makes the training input reproducible.
-
-Splits are deterministic and grouped by charger, so the same physical charger is
-not represented across train, validation, and test. Identical image hashes are
-also forced into one split. A production dataset should additionally maintain a
-sticker identity, perceptual hash and capture burst/session group. A temporal,
-unseen-charger test set gives the strongest evidence against memorization.
-
-Training-only augmentations simulate the stated failures:
-
-- Gaussian and motion blur
-- darkness and overexposure
-- sensor noise and reduced contrast/fading
-- small rotations and perspective distortion
-
-Labels are never transformed. The optional real training path uses
-`TrOCRProcessor`, `VisionEncoderDecoderModel`, a PyTorch `Dataset`,
-`Seq2SeqTrainer`, checkpoint selection, and artifact saving. The saved checkpoint
-is then evaluated through the complete QR/OCR/GPS pipeline before promotion.
-Dry-run mode validates dataset construction without importing PyTorch or
-downloading a model.
-
-### Hybrid dataset and interview notebook
-
-The repository includes a reproducible synthetic sticker generator and a
-normalized importer shared by synthetic, public, physical, and future Tap data:
-
-```powershell
-python -m pip install -e ".[dev,notebook]"
-python -m scripts.generate_synthetic_dataset `
-  --chargers 500 `
-  --variants-per-charger 10 `
-  --seed 42
-python -m scripts.import_dataset --manifest data/synthetic/manifest.json
-jupyter lab notebooks/hybrid_dataset_demo.ipynb
-```
-
-The committed [hybrid dataset notebook](notebooks/hybrid_dataset_demo.ipynb) is
-already executed for GitHub viewing. It generates a small 60-image demonstration,
-shows clean/degraded scans, compares the OpenCV baseline with quality-directed
-preprocessing plus a ZXing-C++ decoder fallback, charts quality signals, and
-asserts that each sticker remains in one split. Large generated files and public
-datasets remain outside Git; see [the dataset strategy](docs/dataset_strategy.md)
-for sources, licence notes, manifest format, and physical-capture guidance.
-
-#### Run the notebook on Kaggle
-
-Import `notebooks/hybrid_dataset_demo.ipynb` into Kaggle and select **Run all**.
-The setup cell finds an attached repository automatically or clones this public
-repository into `/kaggle/working`. For automatic cloning, turn on **Internet** in
-the notebook options. If Internet access is unavailable, upload the repository as
-a Kaggle Dataset and attach it to the notebook; the same setup cell detects it
-under `/kaggle/input`.
-
-## Validation and promotion
-
-The most important metric is **exact payload match**: a partially correct charger
-identifier is usually not actionable. Supporting metrics are:
-
-- Character error rate (Levenshtein edits divided by reference characters)
-- Recovery rate on scans that previously failed
-- Accuracy on clean images
-- Accuracy for blurry, dark, bright, and noisy/faded slices
-- Final charger-resolution accuracy and confidence calibration in production
-
-Evaluation should compare the native app, raw OpenCV, adaptive preprocessing,
-restoration retry, OCR/GPS fallback, and full end-to-end system. The immutable test
-set is used for final reporting, not checkpoint selection.
-
-A candidate must improve exact recovery by a configurable minimum, must not
-regress degraded scans, and may lose no more than one percentage point on clean
-images. Every rejected model and the gate reason remain auditable.
-
-## Parallelism and scale
-
-The API, inference worker, and trainer have separate service boundaries. FastAPI
-`BackgroundTasks` keeps this repository runnable without Redis. At production
-scale:
-
-- Publish scan IDs with a transactional outbox to SQS, Kafka, or a similar queue.
-- Run CPU OpenCV workers and GPU OCR workers in separate autoscaling pools.
-- Cache the promoted model once per worker process.
-- Batch GPU inference where latency permits.
-- Run training on scheduled, immutable dataset snapshots.
-- Store model artifacts in object storage and deploy through a controlled registry.
-
-## Privacy and security
-
-Coordinates and camera images may be sensitive even without a user ID. A
-production deployment should:
-
-- Use short, configurable retention for raw images (30 days by default).
-- Encrypt storage and transport and restrict training-image access by role.
-- Strip unnecessary EXIF metadata before long-term retention.
-- Reduce coordinate precision in analytics that do not need exact location.
-- Support deletion by scan/session ID across PostgreSQL, object storage and
-  derived datasets.
-- Authenticate confirmation and training endpoints and audit reviewer actions.
-- Scan uploads for malicious content and enforce pixel/dimension limits in
-  addition to the implemented byte and MIME limits.
-
-This prototype avoids names, emails, advertising IDs, and other unnecessary
-identity fields.
-
-## Limitations and production improvements
-
-- Background tasks are process-local and are not durable across crashes.
-- SQLite is a local convenience, not the production database.
-- The S3 adapter is implemented but not exercised without credentials.
-- TrOCR is disabled by default and no accuracy claim is made without real data.
-- A fixed printed-ID crop cannot cover every sticker layout.
-- The demonstration confidence weights are explainable heuristics and require
-  calibration on Tap Electric data.
-- Labels marked `verified=true` are trusted by the prototype; production must
-  derive that permission from authenticated reviewer roles.
-- Schema creation uses `create_all`; production should use Alembic migrations.
-
-With more time, prioritize a multi-frame mobile capture flow, QR region detection,
-perceptual duplicate detection, an authenticated review UI, durable job delivery,
-confidence calibration, observability, and shadow evaluation before automated
-model promotion.
+These are synthetic demonstration results, not production Tap Electric metrics.
+The executable TrOCR fine-tuning path is implemented, but no production model was
+trained because real Tap Electric data was not provided.
 
 ## Run locally
 
-Prerequisites: Python 3.11+.
-
-```bash
+```powershell
 python -m venv .venv
-# Windows PowerShell
-.venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
-copy .env.example .env
-python -m scripts.seed_chargers
 uvicorn app.main:app --reload
 ```
 
-The local defaults use `data/tap_qr.db` and `data/images/`. To enable inference
-with an already downloaded model:
+To enable TrOCR, install the ML dependencies and configure model download:
 
-```bash
+```powershell
 python -m pip install -e ".[ml,dev]"
-# .env
-ENABLE_TROCR=true
-TROCR_LOCAL_FILES_ONLY=true
+$env:ENABLE_TROCR = "true"
+$env:TROCR_LOCAL_FILES_ONLY = "false"
+uvicorn app.main:app --reload
 ```
 
-Set `TROCR_LOCAL_FILES_ONLY=false` only when downloading the Hugging Face weights
-is intentional.
+PostgreSQL can be demonstrated locally with:
 
-### Docker
-
-Docker Compose runs the API with PostgreSQL while retaining local object storage:
-
-```bash
+```powershell
 docker compose up --build
 docker compose exec api python -m scripts.seed_chargers
 ```
 
-Real infrastructure is not required for the demo. Set `OBJECT_STORAGE_BACKEND=s3`
-and install the `s3` extra when targeting AWS S3, MinIO, or another compatible
-service.
+## Tests
 
-## Run tests
-
-```bash
+```powershell
 python -m pytest
-python -m pytest --cov=app --cov-report=term-missing
 ruff check .
 ```
 
-Tests use temporary SQLite databases and local directories. They exercise a real
-OpenCV QR decode but mock/disable the heavy Hugging Face path, so no model is
-downloaded.
+## Prototype limitations
 
-## Repository layout
+- TrOCR is disabled by default and requires model weights plus additional ML
+  dependencies.
+- The printed-ID crop is a fixed prototype region; production needs sticker-layout
+  metadata or text-region detection.
+- FastAPI background tasks represent the worker boundary; production should use a
+  durable queue and separate inference/training workers.
+- Database tables use SQLAlchemy `create_all`; production should use migrations.
+- The repository contains backend APIs, not a mobile candidate-selection UI.
 
-```text
-app/
-├── api/routes/             # Scan, inference, training and model APIs
-├── core/                   # Configuration and logging
-├── db/                     # SQLAlchemy schema and sessions
-├── ml/                     # Dataset, augmentation, metrics, training and gates
-├── repositories/           # Persistence boundaries
-├── schemas/                # Pydantic request/response contracts
-└── services/               # Storage and inference/training orchestration
-scripts/                    # Demo charger seed command
-notebooks/                  # Executed hybrid-data interview demonstration
-docs/                       # Dataset provenance and normalized manifest contract
-tests/                      # Fast unit and API tests
-Dockerfile
-docker-compose.yml
-pyproject.toml
-```
+## License
 
-## Scope
-
-The repository intentionally demonstrates sound design rather than pretending to
-be a finished production ML platform. It implements the important seams—durable
-collection, deterministic recovery, honest ML fallback, trusted feedback,
-leakage-aware datasets, meaningful metrics and guarded promotion—without adding a
-distributed stack that would obscure those decisions in a three-hour interview.
+MIT
