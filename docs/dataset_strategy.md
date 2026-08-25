@@ -84,12 +84,14 @@ python -m pip install -e ".[dev,notebook]"
 python -m scripts.generate_synthetic_dataset `
   --chargers 500 `
   --variants-per-charger 10 `
+  --blur-variants-per-charger 2 `
   --seed 42 `
   --output data/synthetic
 ```
 
 This produces 5,000 images plus `data/synthetic/manifest.json`. Variant zero is a
-clean baseline; later variants use one or two seeded degradations. The generator
+clean baseline; two variants per charger guarantee Gaussian- and motion-blur
+coverage, while later variants use one or two seeded degradations. The generator
 records the exact QR decode outcome and image-quality scores after JPEG encoding.
 
 ## Import
@@ -119,6 +121,7 @@ include a frozen temporal set containing unseen chargers and capture sessions.
 ## Notebook
 
 `notebooks/hybrid_dataset_demo.ipynb` is an executed, reproducible dataset evaluation.
-It regenerates 60 examples, displays clean/degraded samples, measures OpenCV QR
-recovery by degradation, visualizes quality signals, and proves split isolation.
+It regenerates 180 examples from 30 chargers, guarantees dedicated Gaussian- and
+motion-blur variants for every charger, displays clean/degraded samples, measures
+QR recovery by degradation, visualizes quality signals, and proves split isolation.
 It does not download TrOCR or report synthetic results as production accuracy.

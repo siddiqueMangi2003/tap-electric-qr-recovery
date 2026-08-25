@@ -17,7 +17,8 @@ def _generate_small_dataset(tmp_path: Path) -> Path:
     return SyntheticDatasetGenerator(
         SyntheticDatasetConfig(
             chargers=3,
-            variants_per_charger=2,
+            variants_per_charger=3,
+            blur_variants_per_charger=2,
             seed=17,
             width=480,
             height=360,
@@ -29,7 +30,7 @@ def test_synthetic_generator_creates_exact_grouped_manifest(tmp_path: Path) -> N
     manifest_path = _generate_small_dataset(tmp_path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     examples = manifest["examples"]
-    assert len(examples) == 6
+    assert len(examples) == 9
     assert {example["split"] for example in examples} == {
         "train",
         "validation",
@@ -48,6 +49,14 @@ def test_synthetic_generator_creates_exact_grouped_manifest(tmp_path: Path) -> N
             assert example["recovery_strategy"]
             assert example["recovery_decoder"] in {"opencv", "zxingcpp"}
     assert all(len(splits) == 1 for splits in split_by_sticker.values())
+    for charger_id in {example["charger_id"] for example in examples}:
+        charger_degradations = {
+            degradation
+            for example in examples
+            if example["charger_id"] == charger_id
+            for degradation in example["degradations"]
+        }
+        assert {"gaussian_blur", "motion_blur"} <= charger_degradations
 
 
 def test_hybrid_importer_is_verified_and_idempotent(tmp_path: Path) -> None:
@@ -60,13 +69,13 @@ def test_hybrid_importer_is_verified_and_idempotent(tmp_path: Path) -> None:
 
     first = importer.import_manifest(manifest_path)
     second = importer.import_manifest(manifest_path)
-    assert first.imported == first.training_eligible == 6
+    assert first.imported == first.training_eligible == 9
     assert first.pending_review == 0
-    assert second.skipped == 6
+    assert second.skipped == 9
 
     with Session(engine) as session:
-        assert session.scalar(select(func.count()).select_from(Scan)) == 6
-        assert session.scalar(select(func.count()).select_from(ScanLabel)) == 6
+        assert session.scalar(select(func.count()).select_from(Scan)) == 9
+        assert session.scalar(select(func.count()).select_from(ScanLabel)) == 9
         assert set(session.scalars(select(Scan.dataset_split))) == {
             "train",
             "validation",

@@ -27,12 +27,15 @@ DEGRADATIONS = (
     "partial_occlusion",
     "jpeg_compression",
 )
+BLUR_DEGRADATIONS = ("gaussian_blur", "motion_blur")
+BLUR_COMPANIONS = ("too_dark", "glare", "faded", "noise", "perspective")
 
 
 @dataclass(frozen=True)
 class SyntheticDatasetConfig:
     chargers: int = 100
     variants_per_charger: int = 8
+    blur_variants_per_charger: int = 1
     seed: int = 42
     width: int = 960
     height: int = 720
@@ -44,6 +47,8 @@ class SyntheticDatasetConfig:
             raise ValueError("At least three chargers are required for grouped splits")
         if self.variants_per_charger < 2:
             raise ValueError("Use at least two variants so each sticker has a degraded example")
+        if not 0 <= self.blur_variants_per_charger < self.variants_per_charger:
+            raise ValueError("blur_variants_per_charger must fit inside the degraded variants")
         if self.width < 480 or self.height < 360:
             raise ValueError("Synthetic camera frames must be at least 480x360")
         if not 0 < self.train_ratio < 1:
@@ -110,6 +115,15 @@ class SyntheticDatasetGenerator:
                     degradations: list[str] = ["clean"]
                     severity = 0.0
                     image = clean_frame.copy()
+                elif variant_index <= self.config.blur_variants_per_charger:
+                    blur_index = variant_index - 1
+                    degradations = [BLUR_DEGRADATIONS[blur_index % len(BLUR_DEGRADATIONS)]]
+                    if self.random.random() < 0.35:
+                        degradations.append(self.random.choice(BLUR_COMPANIONS))
+                    severity = round(self.random.uniform(0.45, 0.95), 3)
+                    image = clean_frame.copy()
+                    for degradation in degradations:
+                        image = self._degrade(image, degradation, severity)
                 else:
                     count = 1 if self.random.random() < 0.65 else 2
                     degradations = self.random.sample(DEGRADATIONS, count)

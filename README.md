@@ -114,11 +114,14 @@ more than 1%.
 
 [Open the hybrid dataset evaluation](notebooks/hybrid_dataset_demo.ipynb).
 It generates labelled charger stickers, applies controlled degradation, checks
-split leakage, and compares decoders. In the committed 60-image evaluation:
+split leakage, and compares decoders. The committed evaluation contains 180 images
+from 30 chargers, including 42 Gaussian-blur and 42 motion-blur examples:
 
-- OpenCV baseline: **51/60 (85%)**
-- Multi-pass OpenCV + ZXing-C++: **56/60 (93.3%)**
+- OpenCV baseline: **120/180 (66.7%)**
+- Multi-pass OpenCV + ZXing-C++: **143/180 (79.4%)**
 
+The blur-heavy benchmark is deliberately harder than the earlier small sample and
+provides stronger failure coverage for recovery and OCR training experiments.
 These are synthetic benchmark results and are reported separately from production
 metrics. The executable TrOCR fine-tuning path is included; production training
 requires verified domain data.
